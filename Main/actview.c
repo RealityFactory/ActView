@@ -95,24 +95,24 @@ typedef struct
 	geWorld		*World;
 	geCamera	*Camera;
 	GE_Rect		Rect;
-	float		XRotCam, YRotCam, Dist, Height;
+	geFloat		XRotCam, YRotCam, Dist, Height;
 	BOOL		ShowFrameRate;
 
 	// animation stuff
 	DWORD		MotionStartTime;
-	float		LastFrameTime;
+	geFloat		LastFrameTime;
 	ActView_PlayMode PlayMode;
 	int			Scale;
 	int			Speed;
 	int			FrameDelta;
-	float		StartExtent, EndExtent, MotionLength;
+	geFloat		StartExtent, EndExtent, MotionLength;
 	geBoolean	Loop;
 
 	// actor stuff
 	geActor_Def	*ActorDef;
 	geActor		*Actor;
-	float		InitialXRot, InitialYRot;
-	float		XRotActor, YRotActor;
+	geFloat		InitialXRot, InitialYRot;
+	geFloat		XRotActor, YRotActor;
 	geVec3d		ActorPos, ActorDefaultPos;
 	geMotion	*Motion;
 	int			LastX, LastY;			// for mouse movement...
@@ -140,15 +140,15 @@ static ActView_WindowData *ActView_GetWindowData (HWND hwnd)
 }
 
 // Turn an integer value into a percentage expressed in floating point.  (Divides by 100)
-static float floatPercent (int Val)
+static geFloat floatPercent (int Val)
 {
-	float fPercent = ((float)Val)/100.0f;
+	geFloat fPercent = ((geFloat)Val)/100.0f;
 
 	return fPercent;
 }
 
 // Turn a floating point value into an integer percentage.  (Multiplies by 100).
-static int MakePercent (float fVal)
+static int MakePercent (geFloat fVal)
 {
 	int iPercent;
 
@@ -310,7 +310,7 @@ static void SetSliderRange (ActView_WindowData *pData, int SliderId)
 
 // Sets the slider's current position and displays the current slider time
 // in the box above the slider.
-static void SetSliderTime (HWND hwnd, int SliderId, float FTime)
+static void SetSliderTime (HWND hwnd, int SliderId, geFloat FTime)
 {
 	char sTime[100];
 	int iPercent;
@@ -330,7 +330,7 @@ static void SetupCamera(geCamera *Camera, GE_Rect *Rect, geXForm3d *XForm)
 }
 
 // Create a transform from the passed rotations and distance
-static void SetupXForm (geXForm3d *XForm, float XRot, float YRot, float Dist)
+static void SetupXForm (geXForm3d *XForm, geFloat XRot, geFloat YRot, geFloat Dist)
 {
 	geXForm3d_SetTranslation (XForm, 0.0f, 0.0f, Dist);
 
@@ -390,13 +390,13 @@ static void ActView_UpdateFrame (ActView_WindowData *pData)
 					{
 						// playing, so update current frame time...
 						DWORD CurrentTime;
-						float ElapsedSeconds;
+						geFloat ElapsedSeconds;
 
 						CurrentTime = timeGetTime ();
 						// Convert elapsed milliseconds from timeGetTime to seconds.
-						ElapsedSeconds = ((float)(CurrentTime - pData->MotionStartTime))/1000.0f;
+						ElapsedSeconds = ((geFloat)(CurrentTime - pData->MotionStartTime))/1000.0f;
 						// And then apply speed factor
-						ElapsedSeconds *= ((float)pData->Speed)/100.0f;
+						ElapsedSeconds *= ((geFloat)pData->Speed)/100.0f;
 
 						// check for looping...
 						if (pData->Loop)
@@ -764,10 +764,10 @@ static void ActView_LoadOptions
 		char sRot[100];
 
 		GetPrivateProfileString ("Options", "XRot", "0", sRot, sizeof (sRot), FName);
-		pData->InitialXRot = (float)atof (sRot);
+		pData->InitialXRot = (geFloat)atof (sRot);
 
 		GetPrivateProfileString ("Options", "YRot", "0", sRot, sizeof (sRot), FName);
-		pData->InitialYRot = (float)atof (sRot);
+		pData->InitialYRot = (geFloat)atof (sRot);
 
 		GetPrivateProfileString ("Options", "LastDir", "", pData->LastDir, sizeof (pData->LastDir), FName);
 	}
@@ -839,9 +839,9 @@ static BOOL SetRenderCursor (ActView_WindowData *pData, int Mode)
 
 // Sets the current frame time to NewFrameTime
 // This will clamp the values to the range StartExtent..EndExtent
-static void ActView_SetFrameTime (ActView_WindowData *pData, const float fTime)
+static void ActView_SetFrameTime (ActView_WindowData *pData, const geFloat fTime)
 {
-	float NewFrameTime = fTime;
+	geFloat NewFrameTime = fTime;
 
 	if (NewFrameTime < pData->StartExtent)
 	{
@@ -887,7 +887,7 @@ static void ActView_UpdateSpeed (ActView_WindowData *pData)
 // Add TimeDelta (expressed in 100ths of a second) to the current frame time
 static void ActView_AdjustFrameTime (ActView_WindowData *pData, int TimeDelta)
 {
-	float fDelta = floatPercent (TimeDelta);
+	geFloat fDelta = floatPercent (TimeDelta);
 
 	ActView_SetFrameTime (pData, pData->LastFrameTime + fDelta);
 }
@@ -909,7 +909,7 @@ static void ActView_UpdateScale (ActView_WindowData *pData)
 		// If an actor is loaded, change its size
 		if (pData->Actor != NULL)
 		{
-			float fScale = floatPercent (pData->Scale);
+			geFloat fScale = floatPercent (pData->Scale);
 			geActor_SetScale (pData->Actor, fScale, fScale, fScale);
 		}
 	}
@@ -1755,11 +1755,11 @@ static BOOL CALLBACK ActView_DlgProc
 			GetWindowRect (GetDlgItem (hwnd, IDC_RENDERWIN), &WindowRect);
 			if (PtInRect (&WindowRect, pt) && IsKeyDown (VK_LBUTTON))
 			{
-				static float Velocity = 1.0f;
-				static float ActorAdjust = 1.0f;
+				static geFloat Velocity = 1.0f;
+				static geFloat ActorAdjust = 1.0f;
 				// compute movement deltas.
-				float dx = (float)(pt.x - pData->LastX);
-				float dy = (float)(pt.y - pData->LastY);
+				geFloat dx = (geFloat)(pt.x - pData->LastX);
+				geFloat dy = (geFloat)(pt.y - pData->LastY);
 
 				switch (pData->MouseMode)
 				{

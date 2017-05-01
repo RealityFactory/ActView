@@ -418,8 +418,8 @@ static RECT GetHandleRect
 static void Blender_DrawTimeLine
 	(
 	  HDC dc,
-	  float StartTime,
-	  float EndTime,
+	  geFloat StartTime,
+	  geFloat EndTime,
 	  geFloat PixelScale
 	)
 {

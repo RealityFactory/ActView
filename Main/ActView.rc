@@ -54,6 +54,7 @@ END
 
 // Icon with lowest ID value placed first to ensure application icon
 // remains consistent on all systems.
+IDI_MAINICON            ICON    DISCARDABLE     "..\\res\\actview.ico"
 IDI_PLAY                ICON    DISCARDABLE     "..\\res\\play.ico"
 IDI_RRSTART             ICON    DISCARDABLE     "..\\res\\rrstart.ico"
 IDI_RRFRAME             ICON    DISCARDABLE     "..\\res\\rrframe.ico"
@@ -64,7 +65,6 @@ IDI_PAUSE               ICON    DISCARDABLE     "..\\res\\pause.ico"
 IDI_ZOOM                ICON    DISCARDABLE     "..\\res\\zoom.ico"
 IDI_PAN                 ICON    DISCARDABLE     "..\\res\\pan.ico"
 IDI_ROTATE              ICON    DISCARDABLE     "..\\res\\rotate.ico"
-IDI_MAINICON            ICON    DISCARDABLE     "..\\res\\mainicon.ico"
 IDI_BLEND               ICON    DISCARDABLE     "..\\res\\blend.ico"
 
 /////////////////////////////////////////////////////////////////////////////
@@ -179,8 +179,8 @@ BEGIN
     DEFPUSHBUTTON   "OK",IDOK,47,98,50,14
     LTEXT           "Genesis3D Actor Viewer Version 2.0",IDC_STATIC,15,76,
                     115,8
-    LTEXT           "Copyright © 1999, WildTangent, Inc.",IDC_STATIC,8,
-                    86,128,8
+    LTEXT           "Copyright © 1999, WildTangent, Inc.",IDC_STATIC,8,86,
+                    128,8
     CONTROL         126,IDB_ACTVIEW,"Static",SS_BITMAP | SS_SUNKEN | 
                     WS_BORDER,10,7,125,64
 END

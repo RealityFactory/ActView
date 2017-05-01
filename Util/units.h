@@ -45,7 +45,7 @@
 #define Units_FRound(n)	((geFloat)floor((n)+0.5f))
 
 #define Units_MakePercent(fVal) (Units_Round(fVal*100.0f))
-#define Units_FloatFromPercent(iVal) (((float)iVal)/100.0f)
+#define Units_FloatFromPercent(iVal) (((geFloat)iVal)/100.0f)
 
 #ifdef __cplusplus
 	}

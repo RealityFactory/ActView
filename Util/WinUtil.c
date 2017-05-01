@@ -38,7 +38,7 @@ void WinUtil_SetDlgItemFloat
 	SetDlgItemText (hwnd, ControlId, sVal);
 }
 
-// Get float from a dialog box.
+// Get geFloat from a dialog box.
 BOOL WinUtil_GetDlgItemFloat 
 	(
 	  HWND hwnd, 
