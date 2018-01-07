@@ -75,20 +75,13 @@
 #define IDC_LOOPED                      1033
 #define IDC_CENTER                      1034
 #define IDC_EDITDIR                     1035
-#define IDC_STATICMOTION2               1035
 #define IDC_TAB1                        1036
-#define IDC_LIST1                       1037
 #define IDC_MOTIONSLIST                 1037
-#define IDC_LIST2                       1038
 #define IDC_BLENDLIST                   1038
-#define IDC_BUTTON1                     1039
 #define IDC_BLEND                       1039
 #define IDC_ADD                         1039
-#define IDC_BUTTON2                     1040
 #define IDC_MOVEUP                      1040
-#define IDC_BUTTON3                     1041
 #define IDC_REMOVE                      1041
-#define IDC_BUTTON4                     1042
 #define IDC_MOVEDOWN                    1042
 #define IDC_EDITTIMEOFFSET              1043
 #define IDC_SLIDERTIMEOFFSET            1044
@@ -107,17 +100,35 @@
 #define IDC_TESTOUT                     1057
 #define IDC_STATICBLEND                 1060
 #define IDC_STATICSUBMOTION             1061
+#define IDC_ENVMAPPING                  1062
+#define IDC_ALLMATERIALS                1063
+#define IDC_STATICMAPPING               1064
+#define IDC_STATICMATERIAL              1065
+#define IDC_STATICALPHA                 1066
+#define IDC_EDITMAPPING                 1067
+#define IDC_SPINMAPPING                 1068
+#define IDC_EDITMATERIAL                1069
+#define IDC_SPINMATERIAL                1070
+#define IDC_EDITALPHA                   1071
+#define IDC_SPINALPHA                   1072
+#define IDC_LISTBONES                   1073
+#define IDC_LISTMATERIALS               1074
+#define IDC_STATICBONES                 1075
+#define IDC_STATICMATERIALS             1076
 #define ID_FILE_EXIT                    40001
 #define ID_FILE_OPEN                    40002
 #define ID_MOTION_SELECT                40003
 #define ID_START                        40004
 #define ID_OPTIONS_FRONT                40005
-#define ID_HELP_CONTENTS                40006
-#define ID_HELP_ABOUT                   40007
-#define ID_OPTIONS_FRAMERATE            40008
-#define IDS_CANTADDWORLD                40009
-#define IDS_CANTSTARTTIMER              40010
-#define IDC_NOTHING                     40011
+#define ID_OPTIONS_FRAMERATE            40006
+#define ID_OPTIONS_COLOR                40007
+#define ID_OPTIONS_SKELETON             40008
+#define ID_OPTIONS_MATERIAL             40009
+#define ID_HELP_CONTENTS                40010
+#define ID_HELP_ABOUT                   40011
+#define IDS_CANTADDWORLD                40012
+#define IDS_CANTSTARTTIMER              40013
+#define IDC_NOTHING                     40014
 #define IDC_STATIC                      -1
 
 // Next default values for new objects
@@ -126,8 +137,8 @@
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NO_MFC                     1
 #define _APS_NEXT_RESOURCE_VALUE        132
-#define _APS_NEXT_COMMAND_VALUE         40012
-#define _APS_NEXT_CONTROL_VALUE         1062
+#define _APS_NEXT_COMMAND_VALUE         40014
+#define _APS_NEXT_CONTROL_VALUE         1079
 #define _APS_NEXT_SYMED_VALUE           101
 #endif
 #endif

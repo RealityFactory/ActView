@@ -49,6 +49,13 @@ END
 
 /////////////////////////////////////////////////////////////////////////////
 //
+// RT_MANIFEST
+//
+
+1                       RT_MANIFEST MOVEABLE PURE "ActView.exe.manifest"
+
+/////////////////////////////////////////////////////////////////////////////
+//
 // Icon
 //
 
@@ -90,6 +97,9 @@ BEGIN
     BEGIN
         MENUITEM "&Save as front",              ID_OPTIONS_FRONT
         MENUITEM "Show &Frame Rate\tE",         ID_OPTIONS_FRAMERATE
+        MENUITEM "Show S&keleton\tCtrl+S",      ID_OPTIONS_SKELETON, GRAYED
+        MENUITEM "Show &Material\tCtrl+M",      ID_OPTIONS_MATERIAL, GRAYED
+        MENUITEM "&Background Color\tCtrl+B",   ID_OPTIONS_COLOR
     END
     POPUP "&Help"
     BEGIN
@@ -105,7 +115,7 @@ END
 // Dialog
 //
 
-IDD_ACTOR DIALOGEX 0, 0, 328, 138
+IDD_ACTOR DIALOGEX 0, 0, 327, 194
 STYLE WS_MINIMIZEBOX | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "Genesis3D Actor Viewer"
 MENU IDR_MENU1
@@ -155,7 +165,32 @@ BEGIN
     PUSHBUTTON      "RRFrame&<",IDI_RRFRAME,259,111,20,20,BS_ICON
     PUSHBUTTON      "FFFrame&>",IDI_FFFRAME,280,111,20,20,BS_ICON
     PUSHBUTTON      "FFEnd&9",IDI_FFEND,301,111,20,20,BS_ICON
-    PUSHBUTTON      "Blen&d",IDC_BLEND,138,105,50,20,BS_ICON
+    PUSHBUTTON      "Blen&d",IDC_BLEND,139,92,50,23,BS_ICON
+    CONTROL         "Environment Mapping",IDC_ENVMAPPING,"Button",
+                    BS_AUTOCHECKBOX | WS_TABSTOP,10,137,85,10
+    CONTROL         "All Materials",IDC_ALLMATERIALS,"Button",
+                    BS_AUTOCHECKBOX | WS_TABSTOP,10,150,53,10
+    LTEXT           "% Mapping:",IDC_STATICMAPPING,9,164,38,8
+    LTEXT           "% Material:",IDC_STATICMATERIAL,54,163,35,8
+    LTEXT           "Alpha:",IDC_STATICALPHA,76,106,21,8
+    EDITTEXT        IDC_EDITMAPPING,9,175,40,14,ES_AUTOHSCROLL | ES_NUMBER
+    CONTROL         "Spin1",IDC_SPINMAPPING,"msctls_updown32",
+                    UDS_SETBUDDYINT | UDS_ALIGNRIGHT | UDS_AUTOBUDDY | 
+                    UDS_ARROWKEYS | UDS_NOTHOUSANDS,43,175,11,14
+    EDITTEXT        IDC_EDITMATERIAL,55,175,40,14,ES_NUMBER
+    CONTROL         "Spin2",IDC_SPINMATERIAL,"msctls_updown32",
+                    UDS_SETBUDDYINT | UDS_ALIGNRIGHT | UDS_AUTOBUDDY | 
+                    UDS_ARROWKEYS | UDS_NOTHOUSANDS,87,175,11,14
+    LISTBOX         IDC_LISTBONES,123,148,82,40,LBS_SORT | 
+                    LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "Bones",IDC_STATICBONES,123,138,21,8
+    LISTBOX         IDC_LISTMATERIALS,239,148,82,40,LBS_SORT | 
+                    LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "Materials",IDC_STATICMATERIALS,239,137,29,8
+    EDITTEXT        IDC_EDITALPHA,75,117,40,14,ES_AUTOHSCROLL | ES_NUMBER
+    CONTROL         "Spin1",IDC_SPINALPHA,"msctls_updown32",UDS_SETBUDDYINT | 
+                    UDS_ALIGNRIGHT | UDS_AUTOBUDDY | UDS_ARROWKEYS | 
+                    UDS_NOTHOUSANDS,109,117,11,14
 END
 
 IDD_DRIVERDIALOG DIALOG DISCARDABLE  0, 0, 253, 130
@@ -236,8 +271,11 @@ IDC_ROTATE              CURSOR  DISCARDABLE     "..\\res\\rotate.cur"
 
 IDR_ACCELERATOR1 ACCELERATORS DISCARDABLE 
 BEGIN
+    "B",            ID_OPTIONS_COLOR,       VIRTKEY, CONTROL, NOINVERT
     "E",            ID_OPTIONS_FRAMERATE,   VIRTKEY, NOINVERT
+    "M",            ID_OPTIONS_MATERIAL,    VIRTKEY, CONTROL, NOINVERT
     "O",            ID_FILE_OPEN,           VIRTKEY, CONTROL, NOINVERT
+    "S",            ID_OPTIONS_SKELETON,    VIRTKEY, CONTROL, NOINVERT
     VK_ESCAPE,      IDC_NOTHING,            VIRTKEY, NOINVERT
     VK_F1,          ID_HELP_CONTENTS,       VIRTKEY, NOINVERT
 END

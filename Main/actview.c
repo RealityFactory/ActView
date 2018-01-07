@@ -1,8 +1,8 @@
 /****************************************************************************************/
 /*  ACTVIEW.C                                                                           */
 /*                                                                                      */
-/*  Author: Jim Mischel		                                                            */
-/*  Description:  Actor Viewer and Motion Blender.  Main module.						*/
+/*  Author: Jim Mischel                                                                 */
+/*  Description:  Actor Viewer and Motion Blender.  Main module.                        */
 /*                                                                                      */
 /*  The contents of this file are subject to the Genesis3D Public License               */
 /*  Version 1.01 (the "License"); you may not use this file except in                   */
@@ -15,8 +15,8 @@
 /*  under the License.                                                                  */
 /*                                                                                      */
 /*  The Original Code is Genesis3D, released March 25, 1999.                            */
-/*Genesis3D Version 1.1 released November 15, 1999                            */
-/*  Copyright (C) 1999 WildTangent, Inc. All Rights Reserved           */
+/*  Genesis3D Version 1.1 released November 15, 1999                                    */
+/*  Copyright (C) 1999 WildTangent, Inc. All Rights Reserved                            */
 /*                                                                                      */
 /****************************************************************************************/
 
@@ -29,6 +29,7 @@
 #pragma warning(default : 4201 4214 4115)
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <io.h>
 #include <math.h>
 #include "genesis.h"
@@ -47,12 +48,18 @@
 
 #pragma message ("Need to disable buttons when no actor selected")
 
+#ifndef WM_MOUSEWHEEL
+#define WM_MOUSEWHEEL	0x020A
+#endif
+
 #define	USER_ALL	0xffffffff
 
 #define ACTOR_WINDOW_WIDTH	480
 #define ACTOR_WINDOW_HEIGHT 360
 
 #define RENDER_BORDER 5
+
+#define DEFAULT_CLEARCOLOR		0x00806040
 
 #define DEFAULT_POSE_INDEX		-1
 #define BLENDED_MOTION_INDEX	-2
@@ -96,7 +103,10 @@ typedef struct
 	geCamera	*Camera;
 	GE_Rect		Rect;
 	geFloat		XRotCam, YRotCam, Dist, Height;
+	COLORREF	ClearColor;
 	BOOL		ShowFrameRate;
+	BOOL		ShowSkeleton;
+	BOOL		ShowMaterial;
 
 	// animation stuff
 	DWORD		MotionStartTime;
@@ -118,6 +128,11 @@ typedef struct
 	int			LastX, LastY;			// for mouse movement...
 	int			CurrentMotion;
 	geMotion	*BlendedMotion;
+
+	geBoolean	EnvironmentMapping;
+	geBoolean	AllMaterial;
+	geFloat		PercentMapping;
+	geFloat		PercentMaterial;
 
 	// timer stuff
 	UINT		loresTimer;
@@ -217,10 +232,10 @@ static void ActView_SetFrameRateToggle
 	HMENU Menu = GetMenu (pData->hwnd);
 	if (Menu != NULL)
 	{
-		CheckMenuItem 
+		CheckMenuItem
 		(
-			Menu, 
-			ID_OPTIONS_FRAMERATE, 
+			Menu,
+			ID_OPTIONS_FRAMERATE,
 			MF_BYCOMMAND | (pData->ShowFrameRate ? MF_CHECKED : MF_UNCHECKED)
 		);
 	}
@@ -228,17 +243,51 @@ static void ActView_SetFrameRateToggle
 	geEngine_EnableFrameRateCounter (pData->Engine, pData->ShowFrameRate);
 }
 
+static void ActView_SetSkeletonToggle
+	(
+	  ActView_WindowData *pData
+	)
+{
+	HMENU Menu = GetMenu (pData->hwnd);
+	if (Menu != NULL)
+	{
+		CheckMenuItem
+		(
+			Menu,
+			ID_OPTIONS_SKELETON,
+			MF_BYCOMMAND | (pData->ShowSkeleton ? MF_CHECKED : MF_UNCHECKED)
+		);
+	}
+}
+
+static void ActView_SetMaterialToggle
+	(
+	  ActView_WindowData *pData
+	)
+{
+	HMENU Menu = GetMenu (pData->hwnd);
+	if (Menu != NULL)
+	{
+		CheckMenuItem
+		(
+			Menu,
+			ID_OPTIONS_MATERIAL,
+			MF_BYCOMMAND | (pData->ShowMaterial ? MF_CHECKED : MF_UNCHECKED)
+		);
+	}
+}
+
 // Hook procedure for checking on mouse messages passed to the dialog box.
 // This is required in order to make the tooltips work.
-static LRESULT CALLBACK ActView_HookProc 
+static LRESULT CALLBACK ActView_HookProc
 	(
-	  int nCode, 
-	  WPARAM wParam, 
+	  int nCode,
+	  WPARAM wParam,
 	  LPARAM lParam
 	)
 {
 	MSG *pMsg;
-	
+
 	pMsg = (MSG *)lParam;
 	// We're only interested in mouse messages for windows that are children of the main dialog.
 	if ((nCode >= 0) && (IsChild (ActView_DlgHandle, pMsg->hwnd)))
@@ -254,7 +303,7 @@ static LRESULT CALLBACK ActView_HookProc
 				ActView_WindowData *pData = (ActView_WindowData *)GetWindowLong (ActView_DlgHandle, GWL_USERDATA);
 
 				// if we find such a message, we relay it to the tooltip control,
-				// which in turn sends a TTN_NEEDTEXT query to the dialog 
+				// which in turn sends a TTN_NEEDTEXT query to the dialog
 				if (pData->hwndTT != NULL)
 				{
 					MSG msg;
@@ -436,6 +485,212 @@ static void ActView_UpdateFrame (ActView_WindowData *pData)
 			{
 				geActor_ClearPose (pData->Actor, &XForm);
 			}
+
+			// render material
+			if(pData->ShowMaterial)
+			{
+				int CurSel;
+				const geXForm3d *CameraXf;
+				geVec3d Pos;
+				geVec3d In, Left, Up;
+				geBitmap *Texture = NULL;
+				geBitmap_Info Info;
+				GE_LVertex	Vertex[4] ={0};
+				geFloat R=0.f, G=0.f, B=0.f;
+				geFloat ScaleX=16.f, ScaleY=16.f;
+
+				CurSel = SendDlgItemMessage (pData->hwnd, IDC_LISTMATERIALS, LB_GETCURSEL, 0, 0);
+				if(CurSel != LB_ERR)
+				{
+					CurSel = SendDlgItemMessage(pData->hwnd, IDC_LISTMATERIALS, LB_GETITEMDATA, CurSel, 0);
+					if(CurSel>=0 && CurSel < geActor_GetMaterialCount(pData->Actor))
+					{
+						geActor_GetMaterial(pData->Actor, CurSel, &Texture, &R, &G, &B);
+						if(Texture)
+						{
+							if(geBitmap_GetInfo(Texture,&Info,NULL))
+							{
+								if(Info.Width<Info.Height)
+								{
+									ScaleX *= (geFloat)Info.Width/(geFloat)Info.Height;
+								}
+								else if(Info.Width>Info.Height)
+								{
+									ScaleY *= (geFloat)Info.Height/(geFloat)Info.Width;
+								}
+
+								geEngine_Printf(pData->Engine, 2, ACTOR_WINDOW_HEIGHT-30, "%d x %d", Info.Width, Info.Height);
+								geEngine_Printf(pData->Engine, 2, ACTOR_WINDOW_HEIGHT-15, "%d bit", gePixelFormat_BytesPerPel(Info.Format)*8);
+							}
+						}
+
+					}
+				}
+
+				Vertex[0].u = 0.f; Vertex[0].v = 0.f;
+				Vertex[1].u = 1.f; Vertex[1].v = 0.f;
+				Vertex[2].u = 1.f; Vertex[2].v = 1.f;
+				Vertex[3].u = 0.f; Vertex[3].v = 1.f;
+				Vertex[0].a = Vertex[1].a = Vertex[2].a = Vertex[3].a = 255.f;
+				Vertex[0].r = Vertex[1].r = Vertex[2].r = Vertex[3].r = R;
+				Vertex[0].g = Vertex[1].g = Vertex[2].g = Vertex[3].g = G;
+				Vertex[0].b = Vertex[1].b = Vertex[2].b = Vertex[3].b = B;
+
+				CameraXf = geCamera_GetWorldSpaceXForm(pData->Camera);
+
+				geXForm3d_GetIn(CameraXf, &In);
+				geXForm3d_GetLeft(CameraXf, &Left);
+				geXForm3d_GetUp(CameraXf, &Up);
+
+				geVec3d_Scale(&Left, ScaleX, &Left);
+				geVec3d_Scale(&Up, ScaleY, &Up);
+
+				Pos = CameraXf->Translation;
+				geVec3d_AddScaled(&Pos, &In, 24.f, &Pos);
+
+				// setup vertices
+				Vertex[0].X = Pos.X + Left.X + Up.X;
+				Vertex[0].Y = Pos.Y + Left.Y + Up.Y;
+				Vertex[0].Z = Pos.Z + Left.Z + Up.Z;
+
+				Vertex[1].X = Pos.X - Left.X + Up.X;
+				Vertex[1].Y = Pos.Y - Left.Y + Up.Y;
+				Vertex[1].Z = Pos.Z - Left.Z + Up.Z;
+
+				Vertex[2].X = Pos.X - Left.X - Up.X;
+				Vertex[2].Y = Pos.Y - Left.Y - Up.Y;
+				Vertex[2].Z = Pos.Z - Left.Z - Up.Z;
+
+				Vertex[3].X = Pos.X + Left.X - Up.X;
+				Vertex[3].Y = Pos.Y + Left.Y - Up.Y;
+				Vertex[3].Z = Pos.Z + Left.Z - Up.Z;
+
+				if(Texture)
+				{
+					geWorld_AddPolyOnce(pData->World, Vertex, 4, Texture, GE_TEXTURED_POLY,
+										GE_RENDER_DO_NOT_OCCLUDE_SELF, 1.f);
+				}
+				else
+				{
+					geWorld_AddPolyOnce(pData->World, Vertex, 4, NULL, GE_GOURAUD_POLY,
+										GE_RENDER_DO_NOT_OCCLUDE_SELF, 1.f);
+				}
+			}
+			// render bones
+			else if(pData->ShowSkeleton)
+			{
+				int iBone;
+				int NumBones;
+				int Parent;
+				int CurSel;
+				const char *BoneName;
+				const geXForm3d *CameraXf;
+				geXForm3d XForm;
+				geVec3d Pos, PosP, Dir;
+				geVec3d In, Left, Up;
+				GE_LVertex	Vertex[4] ={0};
+				geBody *Body = geActor_GetBody(pData->ActorDef);
+
+				NumBones = geActor_GetBoneCount(pData->Actor);
+
+				Vertex[0].a = Vertex[1].a = Vertex[2].a = Vertex[3].a = 255.f;
+
+				CameraXf = geCamera_GetWorldSpaceXForm(pData->Camera);
+
+				geXForm3d_GetIn(CameraXf, &In);
+				geXForm3d_GetLeft(CameraXf, &Left);
+				geXForm3d_GetUp(CameraXf, &Up);
+
+				geVec3d_Scale(&Left, 0.5f, &Left);
+				geVec3d_Scale(&Up, 0.5f, &Up);
+
+				CurSel = SendDlgItemMessage (pData->hwnd, IDC_LISTBONES, LB_GETCURSEL, 0, 0);
+				if(CurSel != LB_ERR)
+				{
+					CurSel = SendDlgItemMessage(pData->hwnd, IDC_LISTBONES, LB_GETITEMDATA, CurSel, 0);
+				}
+
+				// draw bone position
+				for (iBone = 0; iBone < NumBones; ++iBone)
+				{
+					geBody_GetBone(Body, iBone, &BoneName, &XForm, &Parent);
+					geActor_GetBoneTransform(pData->Actor, BoneName, &XForm);
+
+					Pos = XForm.Translation;
+
+					// setup vertices
+					Vertex[0].X = Pos.X + Left.X + Up.X;
+					Vertex[0].Y = Pos.Y + Left.Y + Up.Y;
+					Vertex[0].Z = Pos.Z + Left.Z + Up.Z;
+
+					Vertex[1].X = Pos.X - Left.X + Up.X;
+					Vertex[1].Y = Pos.Y - Left.Y + Up.Y;
+					Vertex[1].Z = Pos.Z - Left.Z + Up.Z;
+
+					Vertex[2].X = Pos.X - Left.X - Up.X;
+					Vertex[2].Y = Pos.Y - Left.Y - Up.Y;
+					Vertex[2].Z = Pos.Z - Left.Z - Up.Z;
+
+					Vertex[3].X = Pos.X + Left.X - Up.X;
+					Vertex[3].Y = Pos.Y + Left.Y - Up.Y;
+					Vertex[3].Z = Pos.Z + Left.Z - Up.Z;
+
+					if(iBone == CurSel)
+					{
+						Vertex[0].r = Vertex[1].r = Vertex[2].r = Vertex[3].r = 224.f;
+						Vertex[0].g = Vertex[1].g = Vertex[2].g = Vertex[3].g = 0.f;
+					}
+					else
+					{
+						Vertex[0].r = Vertex[1].r = Vertex[2].r = Vertex[3].r = 0.f;
+						Vertex[0].g = Vertex[1].g = Vertex[2].g = Vertex[3].g = 224.f;
+					}
+
+					geWorld_AddPolyOnce(pData->World, Vertex, 4, NULL, GE_GOURAUD_POLY,
+							GE_RENDER_DO_NOT_OCCLUDE_SELF, 1.f);
+				}
+
+				Vertex[0].r = Vertex[1].r = Vertex[2].r = Vertex[3].r = 0.f;
+				Vertex[0].g = Vertex[1].g = Vertex[2].g = Vertex[3].g = 0.f;
+				Vertex[0].b = Vertex[1].b = Vertex[2].b = Vertex[3].b = 224.f;
+
+				// draw line to parent
+				for (iBone = 0; iBone < NumBones; ++iBone)
+				{
+					geBody_GetBone(Body, iBone, &BoneName, &XForm, &Parent);
+
+					if(Parent>=0 && Parent<NumBones)
+					{
+						geActor_GetBoneTransform(pData->Actor, BoneName, &XForm);
+						Pos = XForm.Translation;
+
+						Vertex[0].X = Pos.X;
+						Vertex[0].Y = Pos.Y;
+						Vertex[0].Z = Pos.Z;
+
+						geBody_GetBone(Body, Parent, &BoneName, &XForm, &Parent);
+						geActor_GetBoneTransform(pData->Actor, BoneName, &XForm);
+
+						PosP = XForm.Translation;
+
+						geVec3d_Subtract(&Pos, &PosP, &Dir);
+						geVec3d_CrossProduct(&Dir, &In, &Dir);
+						geVec3d_Normalize(&Dir);
+						geVec3d_Scale(&Dir, 0.5f, &Dir);
+
+						Vertex[1].X = PosP.X + Dir.X;
+						Vertex[1].Y = PosP.Y + Dir.Y;
+						Vertex[1].Z = PosP.Z + Dir.Z;
+
+						Vertex[2].X = PosP.X - Dir.X;
+						Vertex[2].Y = PosP.Y - Dir.Y;
+						Vertex[2].Z = PosP.Z - Dir.Z;
+
+						geWorld_AddPolyOnce(pData->World, Vertex, 3, NULL, GE_GOURAUD_POLY,
+								GE_RENDER_DO_NOT_OCCLUDE_SELF, 1.f);
+					}
+				}
+			}
 		}
 	}
 
@@ -551,10 +806,10 @@ BOOL ActView_LoadActor
 		geVec3d BoxPos;
 		geXForm3d XForm;
 		geExtBox ExtBox;
-		
+
 		pData->XRotActor = pData->InitialXRot;
 		pData->YRotActor = pData->InitialYRot;
-		
+
 		// Get the actor's bounding box,
 		// and place the center of the bounding box at the origin...
 		geXForm3d_SetIdentity (&XForm);
@@ -618,10 +873,72 @@ BOOL ActView_LoadActor
 		SendMessage (hwndCombo, CB_SETCURSEL, Index, 0);
 	}
 
+	// Fill bone list box with actor's bones
+	{
+		int iBone;
+		HWND hwndListbox;
+		int NumBones;
+		const char *BoneName;
+		geXForm3d XForm;
+		int Index;
+		geBody *Body = geActor_GetBody(pData->ActorDef);
+
+		hwndListbox = GetDlgItem (pData->hwnd, IDC_LISTBONES);
+		SendMessage (hwndListbox, LB_RESETCONTENT, 0, 0);
+
+		NumBones = geActor_GetBoneCount(pData->Actor);
+
+		for (iBone = 0; iBone < NumBones; ++iBone)
+		{
+			geBody_GetBone(Body, iBone, &BoneName, &XForm, &Index);
+
+			assert (BoneName != NULL);
+
+			Index = SendMessage (hwndListbox, LB_ADDSTRING, 0, (LONG)BoneName);
+			if (Index != LB_ERR)
+			{
+				SendMessage (hwndListbox, LB_SETITEMDATA, Index, iBone);
+			}
+		}
+		// Set selection to first motion
+		SendMessage (hwndListbox, LB_SETCURSEL, 0, 0);
+	}
+
+	// Fill material list box with actor's materials
+	{
+		int iMaterial;
+		HWND hwndListbox;
+		int NumMaterials;
+		geBitmap *Bitmap;
+		geFloat R, G, B;
+		const char *MaterialName;
+		int Index;
+		geBody *Body = geActor_GetBody(pData->ActorDef);
+
+		hwndListbox = GetDlgItem (pData->hwnd, IDC_LISTMATERIALS);
+		SendMessage (hwndListbox, LB_RESETCONTENT, 0, 0);
+
+		NumMaterials = geActor_GetMaterialCount(pData->Actor);
+		for (iMaterial = 0; iMaterial < NumMaterials; ++iMaterial)
+		{
+			geBody_GetMaterial(Body, iMaterial, &MaterialName, &Bitmap, &R, &G, &B);
+
+			assert (MaterialName != NULL);
+
+			Index = SendMessage (hwndListbox, LB_ADDSTRING, 0, (LONG)MaterialName);
+			if (Index != LB_ERR)
+			{
+				SendMessage (hwndListbox, LB_SETITEMDATA, Index, iMaterial);
+			}
+		}
+		// Set selection to first motion
+		SendMessage (hwndListbox, LB_SETCURSEL, 0, 0);
+	}
+
 	return TRUE;
 }
 
-static void ActView_DoLoadActor 
+static void ActView_DoLoadActor
 	(
 	  ActView_WindowData *pData,
 	  const char *Filename
@@ -643,7 +960,7 @@ static void ActView_DoLoadActor
 		geVec3d_Set (&FillLightNormal, -0.3f, 1.0f, 0.4f);
 		geVec3d_Normalize (&FillLightNormal);
 
-		geActor_SetLightingOptions 
+		geActor_SetLightingOptions
 		(
 			pData->Actor, GE_TRUE, &FillLightNormal,
 			128.0f, 128.0f, 128.0f,		// Fill light
@@ -671,6 +988,47 @@ static void ActView_DoLoadActor
 		Blender_UpdateActor (pData->hwndBlender, pData->ActorDef, pData->BlendedMotion);
 	}
 	SetCursor (OldCursor);
+
+	pData->EnvironmentMapping = GE_FALSE;
+	pData->AllMaterial = GE_FALSE;
+	pData->PercentMapping = 0.f;
+	pData->PercentMaterial = 0.f;
+	SetEditControlValue(pData->hwnd, IDC_EDITMAPPING, IDC_SPINMAPPING, 0);
+	SetEditControlValue(pData->hwnd, IDC_EDITMATERIAL, IDC_SPINMATERIAL, 0);
+	SetEditControlValue(pData->hwnd, IDC_EDITALPHA, IDC_SPINALPHA, 255);
+	SendDlgItemMessage(pData->hwnd, IDC_ENVMAPPING, BM_SETCHECK, (WPARAM)FALSE, 0);
+	SendDlgItemMessage(pData->hwnd, IDC_ALLMATERIALS, BM_SETCHECK, (WPARAM)FALSE, 0);
+
+	{
+		HMENU Menu = GetMenu(pData->hwnd);
+
+		EnableMenuItem(Menu, ID_OPTIONS_SKELETON,	MF_BYCOMMAND | MF_ENABLED);
+		EnableMenuItem(Menu, ID_OPTIONS_MATERIAL,	MF_BYCOMMAND | MF_ENABLED);
+
+		pData->ShowMaterial = FALSE;
+		ActView_SetMaterialToggle(pData);
+
+		EnableWindow(GetDlgItem(pData->hwnd, IDC_PAN),		TRUE);
+		EnableWindow(GetDlgItem(pData->hwnd, IDC_ROTATE),	TRUE);
+		EnableWindow(GetDlgItem(pData->hwnd, IDC_ZOOM),		TRUE);
+
+		EnableWindow(GetDlgItem(pData->hwnd, IDC_FRONT),	TRUE);
+		EnableWindow(GetDlgItem(pData->hwnd, IDC_BACK),		TRUE);
+		EnableWindow(GetDlgItem(pData->hwnd, IDC_LEFT),		TRUE);
+		EnableWindow(GetDlgItem(pData->hwnd, IDC_RIGHT),	TRUE);
+		EnableWindow(GetDlgItem(pData->hwnd, IDC_TOP),		TRUE);
+		EnableWindow(GetDlgItem(pData->hwnd, IDC_BOTTOM),	TRUE);
+		EnableWindow(GetDlgItem(pData->hwnd, IDC_CENTER),	TRUE);
+
+		EnableWindow(GetDlgItem(pData->hwnd, IDI_PLAY),		TRUE);
+		EnableWindow(GetDlgItem(pData->hwnd, IDI_PAUSE),	TRUE);
+		EnableWindow(GetDlgItem(pData->hwnd, IDI_STOP),		TRUE);
+		EnableWindow(GetDlgItem(pData->hwnd, IDI_RRSTART),	TRUE);
+		EnableWindow(GetDlgItem(pData->hwnd, IDI_RRFRAME),	TRUE);
+		EnableWindow(GetDlgItem(pData->hwnd, IDI_FFFRAME),	TRUE);
+		EnableWindow(GetDlgItem(pData->hwnd, IDI_FFEND),	TRUE);
+	}
+
 }
 
 /*
@@ -770,6 +1128,9 @@ static void ActView_LoadOptions
 		pData->InitialYRot = (geFloat)atof (sRot);
 
 		GetPrivateProfileString ("Options", "LastDir", "", pData->LastDir, sizeof (pData->LastDir), FName);
+
+		GetPrivateProfileString ("Options", "ClearColor", "8413248", sRot, sizeof (sRot), FName);
+		pData->ClearColor = (COLORREF)atol(sRot);
 	}
 }
 
@@ -854,8 +1215,8 @@ static void ActView_SetFrameTime (ActView_WindowData *pData, const geFloat fTime
 	// Set current frame time
 	pData->LastFrameTime = NewFrameTime;
 	// adjust motion start time so that it's consistent with current time
-	pData->MotionStartTime = 
-		(DWORD)(timeGetTime() - 
+	pData->MotionStartTime =
+		(DWORD)(timeGetTime() -
 		(1000.0f * (pData->LastFrameTime - pData->StartExtent)/floatPercent (pData->Speed)));
 	// and set the slider to reflect the new time
 	SetSliderTime (pData->hwnd, IDC_SLIDERTIME, pData->LastFrameTime);
@@ -932,9 +1293,96 @@ static void ActView_UpdateFrameDelta (ActView_WindowData *pData)
 	SetEditControlValue (pData->hwnd, IDC_EDITFRAMETIME, IDC_SPINFRAMETIME, pData->FrameDelta);
 }
 
+static void ActView_UpdateAlpha (ActView_WindowData *pData)
+{
+	UINT NewValue;
+	BOOL IsOk;
+
+	NewValue = GetDlgItemInt (pData->hwnd, IDC_EDITALPHA, &IsOk, FALSE);
+	if(IsOk && (NewValue >= 0) && (NewValue <= 255))
+	{
+		if(pData->Actor != NULL)
+		{
+			geFloat Alpha = (geFloat)NewValue;
+			geActor_SetAlpha(pData->Actor, Alpha);
+		}
+	}
+	// make sure that edit control always reflects current data value
+	SetEditControlValue (pData->hwnd, IDC_EDITALPHA, IDC_SPINALPHA, NewValue);
+}
+
+static void SetEnvironmentMapping(ActView_WindowData *pData)
+{
+	if(pData->Actor != NULL)
+	{
+		geEnvironmentOptions Options;
+		Options.UseEnvironmentMapping = pData->EnvironmentMapping;
+		Options.PercentPuppet = pData->PercentMaterial*0.01f;
+
+		if(!pData->EnvironmentMapping)
+		{
+			Options.Supercede = GE_FALSE;
+			Options.PercentEnvironment = 1.0f;
+			Options.PercentMaterial = 1.0f;
+		}
+		else
+		{
+			if(!pData->AllMaterial)
+			{
+				Options.Supercede = GE_TRUE;
+				Options.PercentMaterial = pData->PercentMapping*0.01f;
+				Options.PercentEnvironment = 1.0f;
+			}
+			else
+			{
+				Options.Supercede = GE_FALSE;
+				Options.PercentEnvironment = pData->PercentMapping*0.01f;
+				Options.PercentMaterial = 1.0f;
+			}
+		}
+
+		geActor_SetEnvironOptions(pData->Actor, &Options);
+	}
+}
+
+static void ActView_UpdateMapping (ActView_WindowData *pData)
+{
+	UINT NewValue;
+	BOOL IsOk;
+
+	NewValue = GetDlgItemInt (pData->hwnd, IDC_EDITMAPPING, &IsOk, FALSE);
+	if(IsOk && (NewValue >= 0) && (NewValue <= 100))
+	{
+		if(pData->Actor != NULL)
+		{
+			pData->PercentMapping = (geFloat)NewValue;
+			SetEnvironmentMapping(pData);
+		}
+	}
+	// make sure that edit control always reflects current data value
+	SetEditControlValue (pData->hwnd, IDC_EDITMAPPING, IDC_SPINMAPPING, NewValue);
+}
+
+static void ActView_UpdateMaterial (ActView_WindowData *pData)
+{
+	UINT NewValue;
+	BOOL IsOk;
+
+	NewValue = GetDlgItemInt (pData->hwnd, IDC_EDITMATERIAL, &IsOk, FALSE);
+	if(IsOk && (NewValue >= 0) && (NewValue <= 100))
+	{
+		if(pData->Actor != NULL)
+		{
+			pData->PercentMaterial = (geFloat)NewValue;
+			SetEnvironmentMapping(pData);
+		}
+	}
+	// make sure that edit control always reflects current data value
+	SetEditControlValue (pData->hwnd, IDC_EDITMATERIAL, IDC_SPINMATERIAL, NewValue);
+}
 
 // Select a new motion.
-static void ActView_SelectMotion 
+static void ActView_SelectMotion
 	(
 	  ActView_WindowData *pData,
 	  int NewMotion
@@ -957,7 +1405,7 @@ static void ActView_SelectMotion
 			break;
 	}
 	if (pData->Motion != NULL)
-	{					
+	{
 		geMotion_GetTimeExtents (pData->Motion, &pData->StartExtent, &pData->EndExtent);
 	}
 	else
@@ -999,6 +1447,96 @@ static LRESULT wm_Command
 			ActView_SetFrameRateToggle (pData);
 			return 0;
 
+		case ID_OPTIONS_SKELETON:
+			pData->ShowSkeleton = !(pData->ShowSkeleton);
+			ActView_SetSkeletonToggle (pData);
+			return 0;
+
+		case ID_OPTIONS_MATERIAL:
+			pData->ShowMaterial = !(pData->ShowMaterial);
+			ActView_SetMaterialToggle (pData);
+			if(pData->ShowMaterial)
+			{
+				if(pData->Motion != NULL)
+				{
+					pData->PlayMode = PLAYMODE_PAUSE;
+				}
+				if(pData->Actor && pData->World)
+				{
+					geWorld_SetActorFlags(pData->World, pData->Actor, 0);
+				}
+
+				EnableWindow(GetDlgItem(pData->hwnd, IDC_PAN),		FALSE);
+				EnableWindow(GetDlgItem(pData->hwnd, IDC_ROTATE),	FALSE);
+				EnableWindow(GetDlgItem(pData->hwnd, IDC_ZOOM),		FALSE);
+
+				EnableWindow(GetDlgItem(pData->hwnd, IDC_FRONT),	FALSE);
+				EnableWindow(GetDlgItem(pData->hwnd, IDC_BACK),		FALSE);
+				EnableWindow(GetDlgItem(pData->hwnd, IDC_LEFT),		FALSE);
+				EnableWindow(GetDlgItem(pData->hwnd, IDC_RIGHT),	FALSE);
+				EnableWindow(GetDlgItem(pData->hwnd, IDC_TOP),		FALSE);
+				EnableWindow(GetDlgItem(pData->hwnd, IDC_BOTTOM),	FALSE);
+				EnableWindow(GetDlgItem(pData->hwnd, IDC_CENTER),	FALSE);
+
+				EnableWindow(GetDlgItem(pData->hwnd, IDI_PLAY),		FALSE);
+				EnableWindow(GetDlgItem(pData->hwnd, IDI_PAUSE),	FALSE);
+				EnableWindow(GetDlgItem(pData->hwnd, IDI_STOP),		FALSE);
+				EnableWindow(GetDlgItem(pData->hwnd, IDI_RRSTART),	FALSE);
+				EnableWindow(GetDlgItem(pData->hwnd, IDI_RRFRAME),	FALSE);
+				EnableWindow(GetDlgItem(pData->hwnd, IDI_FFFRAME),	FALSE);
+				EnableWindow(GetDlgItem(pData->hwnd, IDI_FFEND),	FALSE);
+			}
+			else
+			{
+				if(pData->Actor && pData->World)
+				{
+					geWorld_SetActorFlags(pData->World, pData->Actor, GE_ACTOR_RENDER_NORMAL);
+				}
+				EnableWindow(GetDlgItem(pData->hwnd, IDC_PAN),		TRUE);
+				EnableWindow(GetDlgItem(pData->hwnd, IDC_ROTATE),	TRUE);
+				EnableWindow(GetDlgItem(pData->hwnd, IDC_ZOOM),		TRUE);
+
+				EnableWindow(GetDlgItem(pData->hwnd, IDC_FRONT),	TRUE);
+				EnableWindow(GetDlgItem(pData->hwnd, IDC_BACK),		TRUE);
+				EnableWindow(GetDlgItem(pData->hwnd, IDC_LEFT),		TRUE);
+				EnableWindow(GetDlgItem(pData->hwnd, IDC_RIGHT),	TRUE);
+				EnableWindow(GetDlgItem(pData->hwnd, IDC_TOP),		TRUE);
+				EnableWindow(GetDlgItem(pData->hwnd, IDC_BOTTOM),	TRUE);
+				EnableWindow(GetDlgItem(pData->hwnd, IDC_CENTER),	TRUE);
+
+				EnableWindow(GetDlgItem(pData->hwnd, IDI_PLAY),		TRUE);
+				EnableWindow(GetDlgItem(pData->hwnd, IDI_PAUSE),	TRUE);
+				EnableWindow(GetDlgItem(pData->hwnd, IDI_STOP),		TRUE);
+				EnableWindow(GetDlgItem(pData->hwnd, IDI_RRSTART),	TRUE);
+				EnableWindow(GetDlgItem(pData->hwnd, IDI_RRFRAME),	TRUE);
+				EnableWindow(GetDlgItem(pData->hwnd, IDI_FFFRAME),	TRUE);
+				EnableWindow(GetDlgItem(pData->hwnd, IDI_FFEND),	TRUE);
+			}
+			return 0;
+
+		case ID_OPTIONS_COLOR :
+			{
+				static COLORREF user[16] = {0};
+				CHOOSECOLOR cc;
+				memset(&cc, 0, sizeof(cc));
+				cc.lStructSize = sizeof(CHOOSECOLOR);
+				cc.hwndOwner = hwnd;
+				cc.rgbResult = pData->ClearColor;
+				cc.lpCustColors = user;
+				cc.Flags = CC_FULLOPEN|CC_ANYCOLOR|CC_RGBINIT;
+
+				if(ChooseColor(&cc))
+				{
+					pData->ClearColor = cc.rgbResult;
+					geEngine_SetClearColor(	pData->Engine,
+											(geFloat)( cc.rgbResult&0x000000ff),
+											(geFloat)((cc.rgbResult&0x0000ff00)>>8),
+											(geFloat)((cc.rgbResult&0x00ff0000)>>16));
+				}
+
+				return 0;
+			}
+
 		case ID_HELP_CONTENTS :
 			WinHelp (hwnd, rcstring_Load (pData->Instance, IDS_HELPFILENAME), HELP_FINDER, 0);
 			return 0;
@@ -1036,6 +1574,16 @@ static LRESULT wm_Command
 			pData->Loop = (SendDlgItemMessage (hwnd, IDC_LOOPED, BM_GETCHECK, 0, 0) == 1) ? GE_TRUE : GE_FALSE;
 			return 0;
 
+		case IDC_ENVMAPPING :
+			pData->EnvironmentMapping = (SendDlgItemMessage (hwnd, IDC_ENVMAPPING, BM_GETCHECK, 0, 0) == 1) ? GE_TRUE : GE_FALSE;
+			SetEnvironmentMapping(pData);
+			return 0;
+
+		case IDC_ALLMATERIALS :
+			pData->AllMaterial = (SendDlgItemMessage (hwnd, IDC_ALLMATERIALS, BM_GETCHECK, 0, 0) == 1) ? GE_TRUE : GE_FALSE;
+			SetEnvironmentMapping(pData);
+			return 0;
+
 		case IDC_EDITSPEED :
 			if (wNotifyCode == EN_KILLFOCUS)
 			{
@@ -1054,6 +1602,27 @@ static LRESULT wm_Command
 			if (wNotifyCode == EN_KILLFOCUS)
 			{
 				ActView_UpdateFrameDelta (pData);
+			}
+			return 0;
+
+		case IDC_EDITALPHA :
+			if (wNotifyCode == EN_KILLFOCUS)
+			{
+				ActView_UpdateAlpha (pData);
+			}
+			return 0;
+
+		case IDC_EDITMATERIAL :
+			if (wNotifyCode == EN_KILLFOCUS)
+			{
+				ActView_UpdateMaterial (pData);
+			}
+			return 0;
+
+		case IDC_EDITMAPPING :
+			if (wNotifyCode == EN_KILLFOCUS)
+			{
+				ActView_UpdateMapping (pData);
 			}
 			return 0;
 
@@ -1249,9 +1818,9 @@ static HWND CreateTooltipsWindow (HWND hwnd)
 	// Controls that will be tipped...
 	static const int TooltipButtons[] =
 	{
-		IDI_PLAY,		IDI_PAUSE,	IDI_STOP,	IDI_RRSTART,	IDI_RRFRAME, 
+		IDI_PLAY,		IDI_PAUSE,	IDI_STOP,	IDI_RRSTART,	IDI_RRFRAME,
 		IDI_FFFRAME,	IDI_FFEND,	IDC_ZOOM,	IDC_PAN,		IDC_ROTATE,
-		IDC_FRONT,		IDC_BACK,	IDC_LEFT,	IDC_RIGHT,		IDC_TOP, 
+		IDC_FRONT,		IDC_BACK,	IDC_LEFT,	IDC_RIGHT,		IDC_TOP,
 		IDC_BOTTOM,		IDC_CENTER,	IDC_STATICCURRENTTIME,		IDC_STATICEND,
 		IDC_EDITSCALE,	IDC_EDITSPEED,	IDC_EDITFRAMETIME,		IDC_BLEND,
 		IDC_STATICSTART
@@ -1263,11 +1832,11 @@ static HWND CreateTooltipsWindow (HWND hwnd)
 	HINSTANCE hInst = (HINSTANCE)GetWindowLong (hwnd, GWL_HINSTANCE);
 
 	// Create tooltip control's window
-	hwndTT = CreateWindowEx 
+	hwndTT = CreateWindowEx
 	(
 		0,
-		TOOLTIPS_CLASS, 
-		NULL, 
+		TOOLTIPS_CLASS,
+		NULL,
 		TTS_ALWAYSTIP,
 		CW_USEDEFAULT, CW_USEDEFAULT,
 		CW_USEDEFAULT, CW_USEDEFAULT,
@@ -1365,9 +1934,19 @@ static BOOL ActView_InitializeDialog (HWND hwnd)
 	pData->hwndTT		= NULL;
 	pData->hwndBlender	= NULL;
 	pData->ShowFrameRate = FALSE;
+	pData->ShowSkeleton = FALSE;
+	pData->ShowMaterial = FALSE;
 	pData->loresTimer	= 0;
 	pData->hiresTimer	= 0;
 	pData->ProcessingTimerMessage = FALSE;
+	pData->StartExtent = 0.0f;
+	pData->EndExtent = 0.0f;
+
+	pData->ClearColor = DEFAULT_CLEARCOLOR;
+	pData->EnvironmentMapping = GE_FALSE;
+	pData->AllMaterial = GE_FALSE;
+	pData->PercentMapping = 0.0f;
+	pData->PercentMaterial = 0.0f;
 
 	// create an empty motion for the blender
 	pData->BlendedMotion = geMotion_Create (GE_TRUE);
@@ -1399,6 +1978,15 @@ static BOOL ActView_InitializeDialog (HWND hwnd)
 	// Setup slider
 	SetSliderRange (pData, IDC_SLIDERTIME);
 	SetSliderTime (hwnd, IDC_SLIDERTIME, 0.0f);
+
+	SetSpinnerRange(hwnd, IDC_SPINMAPPING, 0, 100);
+	SetEditControlValue(hwnd, IDC_EDITMAPPING, IDC_SPINMAPPING, 0);
+
+	SetSpinnerRange(hwnd, IDC_SPINMATERIAL, 0, 100);
+	SetEditControlValue(hwnd, IDC_EDITMATERIAL, IDC_SPINMATERIAL, 0);
+
+	SetSpinnerRange(hwnd, IDC_SPINALPHA, 0, 255);
+	SetEditControlValue(hwnd, IDC_EDITALPHA, IDC_SPINALPHA, 255);
 
 	{
 		// position render window and the rest of the controls.
@@ -1434,7 +2022,7 @@ static BOOL ActView_InitializeDialog (HWND hwnd)
 				int WindowWidth = ClientRect.right - ClientRect.left + 1;
 				int WindowHeight = ClientRect.bottom - ClientRect.top + 1;
 
-				SetWindowPos 
+				SetWindowPos
 				(
 					hwndRender, 0,
 					RENDER_BORDER, RENDER_BORDER, WindowWidth, WindowHeight,
@@ -1465,7 +2053,13 @@ static BOOL ActView_InitializeDialog (HWND hwnd)
 				IDC_STATICFRAME, IDC_EDITFRAMETIME, IDC_SPINFRAMETIME,
 				IDC_FRONT, IDC_BACK, IDC_LEFT, IDC_RIGHT, IDC_TOP, IDC_BOTTOM, IDC_CENTER,
 				IDI_PLAY, IDI_STOP, IDI_PAUSE, IDI_RRFRAME, IDI_FFFRAME, IDI_RRSTART, IDI_FFEND,
-				IDC_BLEND
+				IDC_BLEND,
+				IDC_ENVMAPPING, IDC_ALLMATERIALS,
+				IDC_STATICMAPPING, IDC_EDITMAPPING, IDC_SPINMAPPING,
+				IDC_STATICMATERIAL, IDC_EDITMATERIAL, IDC_SPINMATERIAL,
+				IDC_STATICALPHA, IDC_EDITALPHA, IDC_SPINALPHA,
+				IDC_LISTBONES, IDC_LISTMATERIALS,
+				IDC_STATICBONES, IDC_STATICMATERIALS
 			};
 			static int NumControls = sizeof (MoveableControls) / sizeof (int);
 			int i, MaxX;
@@ -1502,8 +2096,9 @@ static BOOL ActView_InitializeDialog (HWND hwnd)
 					SWP_NOCOPYBITS | SWP_NOZORDER
 				);
 			}
-			
+
 			// Now center the rendered window horizontally in the dialog
+			// Q: Why does this appear to be shifted to the right?
 			{
 				RECT rectRender;
 				RECT rectParent;
@@ -1545,12 +2140,12 @@ static BOOL ActView_InitializeDialog (HWND hwnd)
 			for (iButton = 0; iButton < nButtons; ++iButton)
 			{
 				// set the button image
-				SendDlgItemMessage 
+				SendDlgItemMessage
 				(
 					hwnd,
 					ButtonImages[iButton][0],
-					BM_SETIMAGE, 
-					IMAGE_ICON, 
+					BM_SETIMAGE,
+					IMAGE_ICON,
 					(LPARAM)LoadIcon (pData->Instance, MAKEINTRESOURCE (ButtonImages[iButton][1]))
 				);
 			}
@@ -1558,7 +2153,7 @@ static BOOL ActView_InitializeDialog (HWND hwnd)
 
 		/*
 		  Create the tooltips window so we can do flyby hints.
-		  If the window is created successfully, then we install a message filter hook 
+		  If the window is created successfully, then we install a message filter hook
 		  so the dialog can capture and respond to mouse movement messages and thus
 		  provide the tooltips.
 		*/
@@ -1593,7 +2188,11 @@ static void ActView_ShutdownAll
 	// save last directory
 	if (*pData->IniFilename != '\0')
 	{
+		char sClearColor[100];
+
+		sprintf(sClearColor, "%u", pData->ClearColor);
 		WritePrivateProfileString ("Options", "LastDir", pData->LastDir, pData->IniFilename);
+		WritePrivateProfileString ("Options", "ClearColor", sClearColor, pData->IniFilename);
 	}
 
 	// When the window is closed, we need to notify the parent
@@ -1699,12 +2298,16 @@ static BOOL CALLBACK ActView_DlgProc
 	switch (msg)
 	{
 		case WM_INITDIALOG :
+		{
 			return ActView_InitializeDialog (hwnd);
+		}
 
 		case WM_DESTROY :
+		{
 			ActView_ShutdownAll (hwnd, pData);
 			PostQuitMessage (0);
 			break;
+		}
 
 		case WM_COMMAND :
 		{
@@ -1734,6 +2337,40 @@ static BOOL CALLBACK ActView_DlgProc
 			return 0;
 		}
 
+		case WM_MOUSEWHEEL :
+		{
+			if(!pData->ShowMaterial)
+			{
+				// zoom just moves the camera.
+				short ZDist = (short)HIWORD(wParam);
+				pData->Dist += ZDist*0.01f;
+				// don't let camera go beyond origin...
+				if (pData->Dist < 1.f)
+				{
+					pData->Dist = 1.f;
+				}
+			}
+			return 0;
+		}
+
+		case WM_LBUTTONDOWN :
+		{
+			RECT WindowRect;
+			POINT pt;
+
+			pt.x = LOWORD (lParam);
+			pt.y = HIWORD (lParam);
+
+			ClientToScreen (hwnd, &pt);
+			GetWindowRect (GetDlgItem (hwnd, IDC_RENDERWIN), &WindowRect);
+			if (PtInRect (&WindowRect, pt) )
+			{
+				SetFocus(GetDlgItem(hwnd, IDC_RENDERWIN));
+			}
+
+			return 0;
+		}
+
 		case WM_MOUSEMOVE :
 		{
 			/*
@@ -1753,7 +2390,7 @@ static BOOL CALLBACK ActView_DlgProc
 			*/
 			ClientToScreen (hwnd, &pt);
 			GetWindowRect (GetDlgItem (hwnd, IDC_RENDERWIN), &WindowRect);
-			if (PtInRect (&WindowRect, pt) && IsKeyDown (VK_LBUTTON))
+			if (PtInRect (&WindowRect, pt) && IsKeyDown (VK_LBUTTON) && !pData->ShowMaterial)
 			{
 				static geFloat Velocity = 1.0f;
 				static geFloat ActorAdjust = 1.0f;
@@ -1795,7 +2432,9 @@ static BOOL CALLBACK ActView_DlgProc
 		}
 
 		case WM_SETCURSOR :
+		{
 			return SetRenderCursor (pData, pData->MouseMode);
+		}
 
 		case WM_VSCROLL :
 		{
@@ -1815,6 +2454,18 @@ static BOOL CALLBACK ActView_DlgProc
 			{
 				ActView_UpdateFrameDelta (pData);
 			}
+			else if(hwndScrollbar == GetDlgItem (hwnd, IDC_SPINALPHA))
+			{
+				ActView_UpdateAlpha (pData);
+			}
+			else if(hwndScrollbar == GetDlgItem (hwnd, IDC_SPINMATERIAL))
+			{
+				ActView_UpdateMaterial (pData);
+			}
+			else if(hwndScrollbar == GetDlgItem (hwnd, IDC_SPINMAPPING))
+			{
+				ActView_UpdateMapping (pData);
+			}
 			return 0;
 		}
 
@@ -1828,6 +2479,7 @@ static BOOL CALLBACK ActView_DlgProc
 				int nPos = SendMessage (hwndScrollbar, TBM_GETPOS, 0, 0);
 				ActView_SetFrameTime (pData, floatPercent (nPos));
 			}
+
 			return 0;
 		}
 
@@ -1850,6 +2502,7 @@ static BOOL CALLBACK ActView_DlgProc
 		}
 
 		case WM_BLENDERCLOSING :
+		{
 			// Message passed when the child dialog is closed.
 			// If this is the same as the blender dialog, then clear our blender
 			// dialog value.
@@ -1858,8 +2511,10 @@ static BOOL CALLBACK ActView_DlgProc
 				pData->hwndBlender = NULL;
 			}
 			return 0;
+		}
 
 		case WM_BLENDERMOTIONCHANGED :
+		{
 			// Message passed when the blender dialog changes the motion.
 			// Parent must reload motion because its time extents may have changed.
 			if (pData->CurrentMotion == BLENDED_MOTION_INDEX)
@@ -1868,6 +2523,14 @@ static BOOL CALLBACK ActView_DlgProc
 				ActView_SelectMotion (pData, BLENDED_MOTION_INDEX);
 			}
 			return 0;
+		}
+
+		case WM_WINDOWPOSCHANGED:
+		{
+			if(pData->Engine)
+				geEngine_UpdateWindow(pData->Engine);
+			return 0;
+		}
 
 		default :
 			break;
@@ -1893,13 +2556,13 @@ static geBoolean StartTheEngine
 	//
 	// Start up the engine
 	//
-	pData->Engine = geEngine_Create 
+	pData->Engine = geEngine_Create
 	(
-		hwnd, 
+		hwnd,
 		rcstring_Load (pData->Instance, IDS_PROGRAMBASENAME),
 		"."		// driver directory
 	);
-	
+
 	if (pData->Engine == NULL)
 	{
 		MyError (hwndParent, pData->Instance, IDS_CANTCREATEENGINE);
@@ -1982,6 +2645,10 @@ static geBoolean StartTheEngine
 			return GE_FALSE;
 		}
 
+		geEngine_SetClearColor(pData->Engine,
+								(geFloat)((pData->ClearColor)&0x000000ff),
+								(geFloat)(((pData->ClearColor)&0x0000ff00)>>8),
+								(geFloat)(((pData->ClearColor)&0x00ff0000)>>16));
 	}
 
 	return GE_TRUE;
@@ -2020,23 +2687,23 @@ int CALLBACK WinMain
 
 	InitCommonControls ();
 
-    // create main window.
+	// create main window.
 	// This is the controlling dialog.
-    ActView_DlgHandle = CreateDialog 
+	ActView_DlgHandle = CreateDialog
 	(
-		instance, 
+		instance,
 		MAKEINTRESOURCE (IDD_ACTOR),
-		NULL, 
+		NULL,
 		ActView_DlgProc
 	);
 
-    if (ActView_DlgHandle == NULL)
-    {
-        return 0;
-    }
+	if (ActView_DlgHandle == NULL)
+	{
+		return 0;
+	}
 
 	pData = ActView_GetWindowData (ActView_DlgHandle);
-	
+
 	ShowWindow (ActView_DlgHandle, SW_SHOWNORMAL);
 	UpdateWindow (ActView_DlgHandle);
 
@@ -2077,7 +2744,7 @@ int CALLBACK WinMain
 			}
 		}
 	}
-	
+
 	if (pData->hiresTimer == 0)
 	{
 		pData->TimerMessageId = WM_TIMER;
@@ -2097,7 +2764,7 @@ int CALLBACK WinMain
 		while (GetMessage( &Msg, NULL, 0, 0))
 		{
 			/*
-			  This is kind of weird.  
+			  This is kind of weird.
 			  The main window is a dialog that has a menu.
 			  In order for accelerators to work, we have to check the accelerators
 			  first, then IsDialogMessage, then standard Windows message processing.
@@ -2115,7 +2782,7 @@ int CALLBACK WinMain
 				}
 			}
 		}
-	}	
+	}
 
 	return 0;
 }
